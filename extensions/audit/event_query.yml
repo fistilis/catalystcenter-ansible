@@ -107,6 +107,21 @@
 # canonical_facts is therefore a single `device_id`, taken from the most stable
 # identifier available and provably non-null because the select() guard above
 # each record already proved the last alternative in the chain.
+#
+# 3. `name` MUST BE UNIQUE WITHIN A JOB.
+#    IndirectManagedNodeAudit declares unique_together = [('name', 'job')], and
+#    the controller bulk_create()s every record for a job in one transaction.
+#    Two devices that deduplicate apart on device_id but share a `name` raise
+#    IntegrityError, which rolls back the transaction and loses EVERY audit
+#    record for that job, not just the colliding pair — and reverts
+#    event_queries_processed with it, so the fallback task re-picks the job and
+#    fails identically until it ages out.
+#
+#    hostname is not unique. Staged and PnP devices routinely share a default
+#    or empty hostname, and two switches called `Switch` in one job is the
+#    normal case, not an edge case. So `name` is the same device_id expression
+#    as canonical_facts, and hostname is reported in facts.hostname, which is
+#    not constrained.
 
 # -----------------------------------------------------------------
 # cisco.catalystcenter.inventory_workflow_manager
@@ -125,7 +140,7 @@ cisco.catalystcenter.inventory_workflow_manager:
     .diff[]? | .after? // empty |
     select((.managementIpAddress // null) != null) |
     {
-      name: (.hostname // .managementIpAddress),
+      name: (.serialNumber // .id // .managementIpAddress),
       canonical_facts: {
         device_id: (.serialNumber // .id // .managementIpAddress)
       },
@@ -166,7 +181,7 @@ cisco.catalystcenter.provision_workflow_manager:
     .diff[]? | .after? // empty |
     select((.managementIpAddress // null) != null) |
     {
-      name: (.hostname // .managementIpAddress),
+      name: (.serialNumber // .id // .managementIpAddress),
       canonical_facts: {
         device_id: (.serialNumber // .id // .managementIpAddress)
       },
@@ -195,7 +210,7 @@ cisco.catalystcenter.pnp_device_claim_to_site:
     select(type == "object") |
     select((.serialNumber // .deviceInfo.serialNumber // null) != null) |
     {
-      name: (.hostname // .deviceInfo.hostname // .serialNumber // .deviceInfo.serialNumber),
+      name: (.serialNumber // .deviceInfo.serialNumber),
       canonical_facts: {
         device_id: (.serialNumber // .deviceInfo.serialNumber)
       },
@@ -205,7 +220,8 @@ cisco.catalystcenter.pnp_device_claim_to_site:
         device_type: "network_device",
         platform: "cisco_catalyst_center",
         management_ip: (.managementIpAddress // .deviceInfo.httpHeaders[0].value // "unknown"),
-        catalyst_center_id: (.id // ._id // "unknown")
+        catalyst_center_id: (.id // ._id // "unknown"),
+        hostname: (.hostname // .deviceInfo.hostname // "unknown")
       }
     }
 
@@ -221,7 +237,7 @@ cisco.catalystcenter.pnp_device_claim:
     select(type == "object") |
     select((.serialNumber // .deviceInfo.serialNumber // null) != null) |
     {
-      name: (.hostname // .deviceInfo.hostname // .serialNumber // .deviceInfo.serialNumber),
+      name: (.serialNumber // .deviceInfo.serialNumber),
       canonical_facts: {
         device_id: (.serialNumber // .deviceInfo.serialNumber)
       },
@@ -231,7 +247,8 @@ cisco.catalystcenter.pnp_device_claim:
         device_type: "network_device",
         platform: "cisco_catalyst_center",
         management_ip: (.managementIpAddress // "unknown"),
-        catalyst_center_id: (.id // ._id // "unknown")
+        catalyst_center_id: (.id // ._id // "unknown"),
+        hostname: (.hostname // .deviceInfo.hostname // "unknown")
       }
     }
 
@@ -247,7 +264,7 @@ cisco.catalystcenter.pnp_device:
     select(type == "object") |
     select((.serialNumber // .deviceInfo.serialNumber // null) != null) |
     {
-      name: (.hostname // .deviceInfo.hostname // .serialNumber // .deviceInfo.serialNumber),
+      name: (.serialNumber // .deviceInfo.serialNumber),
       canonical_facts: {
         device_id: (.serialNumber // .deviceInfo.serialNumber)
       },
@@ -257,6 +274,7 @@ cisco.catalystcenter.pnp_device:
         device_type: "network_device",
         platform: "cisco_catalyst_center",
         management_ip: (.managementIpAddress // "unknown"),
-        catalyst_center_id: (.id // ._id // "unknown")
+        catalyst_center_id: (.id // ._id // "unknown"),
+        hostname: (.hostname // .deviceInfo.hostname // "unknown")
       }
     }
